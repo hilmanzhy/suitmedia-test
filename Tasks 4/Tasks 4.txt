@@ -1,0 +1,71 @@
+saya menggunakan cloudbuild step GCP
+
+cloud_build_script_frontend_production_cdn = [
+  {
+    id = "Build-serve"
+    name = "$_GCR_HOSTNAME/$PROJECT_ID/sonarqube-scanner-cli/sonarqube-scanner-v2:12.22.12"
+    entrypoint = "bash"
+    args = [
+        "-c",
+        "npm install && npm run test -- --watchAll=false && /launch-sonarqube-cli.sh \"$$SONARQUBE_ENV\""
+    ]
+    secret_env = ["SONARQUBE_ENV"]
+  },
+  {
+    id = "Integration-test"
+    name = "gcr.io/cloud-builders/docker"
+    entrypoint = "bash"
+    args = [
+        "-c",
+        "npm ci && npm run test:integration -- --runInBand"
+    ]
+    secret_env = []
+  },
+  {
+    id = "E2E-test"
+    name = "mcr.microsoft.com/playwright:v1.48.2-jammy"
+    entrypoint = "bash"
+    args = [
+        "-c",
+        "npm ci && npx playwright install --with-deps && npm run test:e2e"
+    ]
+    secret_env = []
+  },
+  {
+    id = "Build-service-image"
+    name = "gcr.io/cloud-builders/docker"
+    entrypoint = "bash"
+    args = [
+        "-c",
+        "docker build -t $_GCR_HOSTNAME/$PROJECT_ID/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA --build-arg \"APP_SECRET=$$APP_SECRET\" --build-arg \"NEXT_PUBLIC_BUILD_ID=$BUILD_ID\" --build-arg \"NEXT_PUBLIC_CDN_URL=$_WEBSITE_CDN_URL\" . -f Dockerfile-production"
+    ]
+    secret_env = ["APP_SECRET"]
+  },
+  {
+    id = "Push-container-registry"
+    name = "gcr.io/cloud-builders/docker"
+    entrypoint = null,
+    args = [
+      "push",
+      "$_GCR_HOSTNAME/$PROJECT_ID/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA"
+    ]
+    secret_env = []
+  },
+  {
+    id = "Update-cloud-run"
+    name = "gcr.io/google.com/cloudsdktool/cloud-sdk:slim"
+    entrypoint = "gcloud"
+    args = [
+      "run",
+      "services",
+      "update",
+      "$_SERVICE_NAME",
+      "--platform=managed",
+      "--image=$_GCR_HOSTNAME/$PROJECT_ID/$REPO_NAME/$_SERVICE_NAME:$COMMIT_SHA",
+      "--labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,$_LABELS",
+      "--region=$_DEPLOY_REGION",
+      "--quiet",
+    ]
+    secret_env = []
+  }
+]
